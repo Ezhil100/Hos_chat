@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/hospital-icon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Hospital AI Assistant - 24/7 Healthcare Support with RAG-powered intelligent chat system for patients, visitors, and staff." />
+    <meta name="keywords" content="hospital, AI assistant, healthcare, chatbot, medical support" />
+    <meta name="theme-color" content="#667eea" />
+    <meta name="author" content="Hospital AI Team" />
+    
+    <!-- Open Graph Meta Tags -->
+    <meta property="og:title" content="Hospital AI Assistant" />
+    <meta property="og:description" content="24/7 Healthcare Support - Intelligent AI assistant for all your medical queries" />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/og-image.png" />
+    
+    <!-- Twitter Card Meta Tags -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Hospital AI Assistant" />
+    <meta name="twitter:description" content="24/7 Healthcare Support" />
+    
+    <title>Hospital AI Assistant - 24/7 Healthcare Support</title>
+    
+    <!-- Preconnect to improve performance -->
+    <link rel="preconnect" href="http://localhost:8000" />
+    
+    <!-- Global Styles -->
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      
+      html, body {
+        height: 100%;
+        width: 100%;
+        overflow: hidden;
+      }
+      
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+          'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+          sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background-attachment: fixed;
+      }
+      
+      #root {
+        height: 100%;
+        width: 100%;
+      }
+      
+      /* Loading Animation */
+      .app-loading {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      }
+      
+      .loading-spinner {
+        width: 60px;
+        height: 60px;
+        position: relative;
+      }
+      
+      .loading-spinner::before {
+        content: '';
+        box-sizing: border-box;
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 60px;
+        height: 60px;
+        margin-top: -30px;
+        margin-left: -30px;
+        border-radius: 50%;
+        border: 4px solid rgba(255, 255, 255, 0.2);
+        border-top-color: #fff;
+        animation: spinner 0.8s linear infinite;
+      }
+      
+      @keyframes spinner {
+        to { transform: rotate(360deg); }
+      }
+      
+      .loading-text {
+        position: absolute;
+        top: 60%;
+        left: 50%;
+        transform: translateX(-50%);
+        color: white;
+        font-size: 18px;
+        font-weight: 500;
+        margin-top: 20px;
+        letter-spacing: 1px;
+      }
+      
+      /* Scrollbar Styling */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      
+      ::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 4px;
+      }
+      
+      ::-webkit-scrollbar-thumb {
+        background: #667eea;
+        border-radius: 4px;
+      }
+      
+      ::-webkit-scrollbar-thumb:hover {
+        background: #5568d3;
+      }
+      
+      /* Print Styles */
+      @media print {
+        body {
+          background: white !important;
+        }
+      }
+      
+      /* Accessibility - Focus Visible */
+      *:focus-visible {
+        outline: 2px solid #667eea;
+        outline-offset: 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Loading Screen -->
+    <div id="root">
+      <div class="app-loading">
+        <div>
+          <div class="loading-spinner"></div>
+          <div class="loading-text">Loading Hospital AI...</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- No JavaScript Fallback -->
+    <noscript>
+      <div style="
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        text-align: center;
+        padding: 20px;
+        font-family: system-ui, -apple-system, sans-serif;
+      ">
+        <div>
+          <h1 style="font-size: 32px; margin-bottom: 16px;">⚕️ Hospital AI Assistant</h1>
+          <p style="font-size: 18px; margin-bottom: 24px;">
+            JavaScript is required to run this application.
+          </p>
+          <p style="font-size: 14px; opacity: 0.9;">
+            Please enable JavaScript in your browser settings to continue.
+          </p>
+        </div>
+      </div>
+    </noscript>
+    
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

@@ -1,0 +1,34 @@
+python-dotenv
+streamlit
+langchain-community
+langchain-text-splitters
+langchain-groq
+unstructured
+unstructured[pdf]
+faiss-cpu
+transformers
+sentence-transformers
+nltk
+# PDF Processing and AI Chatbot Requirements for Python 3.13
+
+# Core utilities
+python-dotenv
+
+# AI and ML libraries
+streamlit
+langchain-community
+langchain-text-splitters
+langchain-groq
+faiss-cpu
+transformers
+sentence-transformers
+nltk
+
+# PDF Processing libraries
+PyPDF2
+pymupdf
+unstructured[pdf]
+Pillow
+
+# Firebase
+firebase-admin
