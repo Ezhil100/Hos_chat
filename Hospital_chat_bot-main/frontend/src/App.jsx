@@ -2,6 +2,25 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 const API_BASE_URL = 'http://localhost:8000'; // Adjust as needed
 
+// Time formatting helpers (no seconds)
+const formatTime = (date) => {
+  try {
+    const d = date instanceof Date ? date : new Date(date);
+    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+};
+
+const formatDateTime = (date) => {
+  try {
+    const d = date instanceof Date ? date : new Date(date);
+    return d.toLocaleString([], { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+};
+
 // Icons Component (keeping same as original)
 const Icons = {
   Hospital: () => (
@@ -649,7 +668,7 @@ const App = () => {
     setMessages([{
       type: 'bot',
       content: `Welcome! You are accessing as a ${role}. How can I help you today?`,
-      timestamp: new Date().toLocaleTimeString()
+      timestamp: formatTime(new Date())
     }]);
     if (role === 'patient' || role === 'visitor') {
       setTempUserName('');
@@ -664,7 +683,7 @@ const App = () => {
     const userMsg = {
       type: 'user',
       content: inputMessage,
-      timestamp: new Date().toLocaleTimeString()
+      timestamp: formatTime(new Date())
     };
     
     setMessages(prev => [...prev, userMsg]);
@@ -679,7 +698,7 @@ const App = () => {
       const botMsg = {
         type: 'bot',
         content: response.response || 'No response generated.',
-        timestamp: new Date().toLocaleTimeString()
+        timestamp: formatTime(new Date())
       };
       setMessages(prev => [...prev, botMsg]);
       // Optionally surface appointment status in UI
@@ -698,7 +717,7 @@ const App = () => {
       setMessages(prev => [...prev, {
         type: 'bot',
         content: 'Sorry, I encountered an error. Please try again.',
-        timestamp: new Date().toLocaleTimeString()
+        timestamp: formatTime(new Date())
       }]);
     } finally {
       setIsTyping(false);
@@ -720,7 +739,7 @@ const App = () => {
     setMessages(prev => [...prev, {
       type: 'bot',
       content: `Thanks${name ? `, ${name}` : ''}. I have your contact ${phone ? `(${phone})` : ''}. You can ask to book an appointment anytime.`,
-      timestamp: new Date().toLocaleTimeString()
+      timestamp: formatTime(new Date())
     }]);
   };
 
@@ -796,7 +815,7 @@ const App = () => {
             Document "{uploadFile.name}" uploaded successfully!
           </span>
         ),
-        timestamp: new Date().toLocaleTimeString()
+        timestamp: formatTime(new Date())
       }]);
       
       setUploadFile(null);
@@ -816,7 +835,7 @@ const App = () => {
             Upload failed: {error.message}
           </span>
         ),
-        timestamp: new Date().toLocaleTimeString()
+        timestamp: formatTime(new Date())
       }]);
     } finally {
       if (uploadIntervalRef.current) {
@@ -842,7 +861,7 @@ const App = () => {
             Documents reloaded successfully!
           </span>
         ),
-        timestamp: new Date().toLocaleTimeString()
+        timestamp: formatTime(new Date())
       }]);
       await loadDocuments();
       await loadSystemStatus();
@@ -855,7 +874,7 @@ const App = () => {
             Reload failed: {error.message}
           </span>
         ),
-        timestamp: new Date().toLocaleTimeString()
+        timestamp: formatTime(new Date())
       }]);
     } finally {
       setLoading(false);
@@ -897,9 +916,9 @@ const App = () => {
     }
   };
 
-  const loadAppointments = async () => {
+  const loadAppointments = async (statusOverride = null) => {
     try {
-      const response = await api.getAppointments(appointmentFilter);
+      const response = await api.getAppointments(statusOverride ?? appointmentFilter);
       setAppointments(response.appointments || []);
     } catch (error) {
       console.error('Failed to load appointments:', error);
@@ -1396,7 +1415,7 @@ const App = () => {
                       <h3 style={styles.cardTitle}>Appointment Requests</h3>
                       <select 
                         value={appointmentFilter}
-                        onChange={(e) => { setAppointmentFilter(e.target.value); setTimeout(() => loadAppointments(), 100); }}
+                        onChange={(e) => { const v = e.target.value; setAppointmentFilter(v); loadAppointments(v); }}
                         style={styles.filterSelect}
                       >
                         <option value="pending">Pending</option>
@@ -1418,7 +1437,7 @@ const App = () => {
                                   color: apt.status === 'pending' ? '#856404' : apt.status === 'accepted' ? '#155724' : '#721c24'
                                 }}>{apt.status}</span>
                               </div>
-                              <span style={styles.appointmentTime}>{new Date(apt.created_at).toLocaleString()}</span>
+                              <span style={styles.appointmentTime}>{formatDateTime(apt.created_at)}</span>
                             </div>
                             <div style={styles.appointmentDetails}>
                               <div style={styles.appointmentRow}><span>📞</span><span style={styles.phoneNumber}>{apt.phone_number}</span></div>
@@ -1469,7 +1488,7 @@ const App = () => {
                               <span style={styles.historyRole}>{chat.user_role}</span>
                               {chat.is_appointment_request && (<span style={styles.appointmentTag}>📅 Appointment</span>)}
                             </div>
-                            <span style={styles.historyTime}>{new Date(chat.created_at).toLocaleString()}</span>
+                            <span style={styles.historyTime}>{formatDateTime(chat.created_at)}</span>
                           </div>
                           <div style={styles.historyMessage}>
                             <div style={styles.historyQuestion}><strong>Q:</strong> {chat.message}</div>
@@ -1501,7 +1520,7 @@ const App = () => {
                             {!n.read && (<span style={styles.unreadBadge}>New</span>)}
                           </div>
                           <p style={styles.notificationMessage}>{n.message}</p>
-                          <div style={styles.notificationTime}>{new Date(n.created_at).toLocaleString()}</div>
+                          <div style={styles.notificationTime}>{formatDateTime(n.created_at)}</div>
                         </div>
                       ))
                     )}
