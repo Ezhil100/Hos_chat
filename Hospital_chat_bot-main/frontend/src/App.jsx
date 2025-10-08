@@ -144,6 +144,23 @@ const FormattedMessage = ({ content }) => {
     return <TableRenderer content={content} />;
   }
 
+  // Helper: render inline **bold** segments
+  const renderInline = (text) => {
+    if (text == null) return text;
+    if (typeof text !== 'string') return text;
+    const out = [];
+    let last = 0;
+    const regex = /\*\*(.+?)\*\*/g;
+    let m;
+    while ((m = regex.exec(text)) !== null) {
+      if (m.index > last) out.push(text.slice(last, m.index));
+      out.push(<strong key={`b-${out.length}`} style={{ color: '#1F3A9E' }}>{m[1]}</strong>);
+      last = regex.lastIndex;
+    }
+    if (last < text.length) out.push(text.slice(last));
+    return out.length ? out : text;
+  };
+
   // Split by lines and process each line
   const lines = content.split('\n');
   
@@ -175,9 +192,11 @@ const FormattedMessage = ({ content }) => {
           );
         }
         
-        // Check if line is a bullet point
-        if (trimmedLine.startsWith('• ')) {
-          const bulletText = trimmedLine.slice(2);
+        // Check if line is a bullet point (supports '• ', '* ', '- ')
+        if (trimmedLine.startsWith('• ') || /^[-*]\s+/.test(trimmedLine)) {
+          const bulletText = trimmedLine.startsWith('• ')
+            ? trimmedLine.slice(2)
+            : trimmedLine.replace(/^[-*]\s+/, '');
           return (
             <div key={index} style={{ 
               marginLeft: '20px', 
@@ -193,7 +212,7 @@ const FormattedMessage = ({ content }) => {
                 fontSize: '16px',
                 minWidth: '16px'
               }}>•</span>
-              <span style={{ flex: 1, lineHeight: '1.5' }}>{bulletText}</span>
+              <span style={{ flex: 1, lineHeight: '1.5' }}>{renderInline(bulletText)}</span>
             </div>
           );
         }
@@ -204,6 +223,24 @@ const FormattedMessage = ({ content }) => {
           const number = match ? match[1] : '';
           const content = match ? match[2] : trimmedLine;
           
+          // If the entire content is wrapped in **bold**, treat it as a header (category title)
+          if (/^\*\*(.+)\*\*$/.test(content)) {
+            const headerText = content.replace(/^\*\*(.+)\*\$/, '**$1**');
+            return (
+              <div key={index} style={{ 
+                fontWeight: '600', 
+                fontSize: '17px', 
+                color: '#1F3A9E', 
+                marginTop: index > 0 ? '16px' : '0',
+                marginBottom: '10px',
+                borderBottom: '2px solid #e8f1ff',
+                paddingBottom: '6px'
+              }}>
+                {headerText.slice(2, -2)}
+              </div>
+            );
+          }
+
           // Parse tokens separated by ' - ' and treat the LAST employment-type token specially.
           // This lets us merge compound names like "Cardiac - Anesthesiology" -> "Cardiac Anesthesiology".
           let formattedContent = content;
@@ -260,6 +297,10 @@ const FormattedMessage = ({ content }) => {
               }
             }
           }
+          // Apply inline bold if still plain text
+          if (typeof formattedContent === 'string') {
+            formattedContent = renderInline(formattedContent);
+          }
           
           return (
             <div key={index} style={{ 
@@ -294,7 +335,7 @@ const FormattedMessage = ({ content }) => {
             marginBottom: '8px',
             lineHeight: '1.5'
           }}>
-            {trimmedLine}
+            {renderInline(trimmedLine)}
           </div>
         );
       })}
