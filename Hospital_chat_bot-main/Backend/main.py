@@ -363,100 +363,67 @@ def format_response_text(text: str) -> str:
     # Clean up the text first
     original_text = text.strip()
     
-    # Check if this looks like a table request or table data
-    if 'table format' in original_text.lower() or ('|' in original_text and '---' in original_text):
-        return original_text  # Return as-is for table formatting
+    # Check if this contains table content
+    has_markdown_table = ('|' in original_text and '---' in original_text)
+    has_table_request = 'table format' in original_text.lower()
     
-    # Fix broken numbered lists where numbers appear on separate lines
-    # First, normalize the text and fix common AI formatting issues
-    text = original_text
-    
-    # Fix patterns like "1.\nName" or "1. Name 2.\nNext name"
-    text = re.sub(r'(\d+\.)\s*\n\s*([A-Za-z])', r'\1 \2', text)
-    
-    # Fix patterns where multiple items run together
-    text = re.sub(r'([A-Za-z\)]\s+)(\d+\.)(?=\s*[A-Za-z])', r'\1\n\2', text)
-    
-    # Fix standalone numbers that got separated
-    text = re.sub(r'\n\s*(\d+)\s*\n\s*(\d+\.)', r'\n\1\2', text)
-    
-    lines = []
-    
-    # Split into lines and process sequentially to maintain order
-    raw_lines = text.split('\n')
-    
-    current_number = 0
-    pending_number = None
-    
-    for line in raw_lines:
-        line = line.strip()
-        if not line:
-            continue
+    if has_markdown_table or has_table_request:
+        # For table content, clean up but preserve the table structure
+        lines = original_text.split('\n')
+        cleaned_lines = []
+        in_table = False
         
-        # Check if this line is just a standalone number
-        if re.match(r'^\d+$', line):
-            pending_number = int(line)
-            continue
-        
-        # Check if this line starts with a number
-        number_match = re.match(r'^(\d+\.)\s*(.+)', line)
-        if number_match:
-            number = number_match.group(1)
-            content = number_match.group(2).strip()
+        for line in lines:
+            stripped_line = line.strip()
             
-            # Clean up content
-            content = re.sub(r'\s+', ' ', content)
-            content = content.rstrip('.')
-            
-            lines.append(f"{number} {content}")
-            current_number = int(number.rstrip('.'))
-            pending_number = None
-            continue
-        
-        # Check if we have a pending number and this line has content
-        if pending_number is not None and line and not line.startswith(str(pending_number)):
-            # This content belongs to the pending number
-            content = line.strip().rstrip('.')
-            content = re.sub(r'\s+', ' ', content)
-            lines.append(f"{pending_number}. {content}")
-            current_number = pending_number
-            pending_number = None
-            continue
-        
-        # Handle non-numbered content (headers, descriptions, etc.)
-        if not re.match(r'^\d+', line):
-            # This is regular text
-            if 'department' in line.lower():
-                dept_match = re.search(r'([A-Za-z\s]+department)', line, re.IGNORECASE)
-                if dept_match:
-                    dept_name = dept_match.group(1).title()
-                    lines.append("")
-                    lines.append(f"**{dept_name}**")
-                    
-                    remaining = line[dept_match.end():].strip()
-                    if remaining.startswith(':') or remaining.startswith('is:'):
-                        remaining = re.sub(r'^:?\s*is:?\s*', '', remaining)
-                    if remaining:
-                        lines.append(remaining)
-                    lines.append("")
-                    continue
-            
-            # Regular descriptive text
-            if any(phrase in line.lower() for phrase in ['mentioned:', 'list of', 'includes', 'following', 'columns:']):
-                lines.append(line)
+            # Detect table start (header row with multiple |)
+            if stripped_line.startswith('|') and stripped_line.count('|') >= 3:
+                if not in_table:
+                    # First table row - this starts our table
+                    in_table = True
+                cleaned_lines.append(line)  # Keep table rows
                 continue
                 
-            lines.append(line)
+            # Detect table separator row
+            if stripped_line.startswith('|') and '---' in stripped_line:
+                cleaned_lines.append(line)  # Keep separator
+                continue
+                
+            # If we're in a table and hit a non-table line, table ended
+            if in_table and not stripped_line.startswith('|'):
+                in_table = False
+                
+            # Always keep non-table content
+            if not stripped_line.startswith('|') or not in_table:
+                cleaned_lines.append(line)
+        
+        return '\n'.join(cleaned_lines).strip()
     
-    # Clean up the results
-    formatted_text = '\n'.join(lines)
+    # STEP 1: Fix ALL broken words that got split (MOST IMPORTANT)
+    # "department\ns" -> "departments"
+    # "doctor\ns" -> "doctors" 
+    # "service\ns" -> "services"
+    # "hospital\ns" -> "hospitals"
+    # Any word + \n + s = word + s
+    text = re.sub(r'([a-zA-Z])\s*\n\s*s\b', r'\1s', original_text)
     
-    # Clean up excessive whitespace while preserving intentional spacing
-    formatted_text = re.sub(r'\n{3,}', '\n\n', formatted_text)
-    formatted_text = re.sub(r'^\n+', '', formatted_text)  # Remove leading newlines
-    formatted_text = re.sub(r'\n+$', '', formatted_text)  # Remove trailing newlines
+    # STEP 2: Fix other broken words (any letter + newline + lowercase letters)
+    text = re.sub(r'([a-zA-Z])\s*\n\s*([a-z]+)', r'\1\2', text)
     
-    return formatted_text
+    # STEP 3: Fix broken sentences (words that should be on same line)
+    # "The Hospital Has The Following\nDepartments:" -> "The Hospital Has The Following Departments:"
+    text = re.sub(r'([a-zA-Z,])\s*\n\s*([a-z][^A-Z]*)', r'\1 \2', text)
+    
+    # STEP 3: ONLY fix numbered lists where number is completely separate from name
+    # "1.\n\nBalasubramanian C" -> "1. Balasubramanian C"
+    text = re.sub(r'(\d+\.)\s*\n+\s*([A-Za-z][A-Za-z\s]*?)(?=\s*\n\s*\d+\.|\s*$)', r'\1 \2', text)
+    
+    # STEP 4: Clean up excessive whitespace
+    text = re.sub(r'[ \t]+', ' ', text)  # Multiple spaces to single space
+    text = re.sub(r'\n{3,}', '\n\n', text)  # Multiple newlines to double newline
+    
+    # STEP 5: Just return the cleaned text - no complex processing
+    return text.strip()
 
 # =============================================================================
 # OTHER ENDPOINTS

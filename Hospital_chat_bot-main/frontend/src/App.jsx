@@ -204,36 +204,60 @@ const FormattedMessage = ({ content }) => {
           const number = match ? match[1] : '';
           const content = match ? match[2] : trimmedLine;
           
-          // Parse doctor information if it contains specialization and employment type
+          // Parse tokens separated by ' - ' and treat the LAST employment-type token specially.
+          // This lets us merge compound names like "Cardiac - Anesthesiology" -> "Cardiac Anesthesiology".
           let formattedContent = content;
           if (content.includes(' - ')) {
-            const parts = content.split(' - ');
-            if (parts.length >= 3) {
-              const name = parts[0].trim();
-              const specialization = parts[1].trim();
-              const employmentType = parts.slice(2).join(' - ').trim();
-              
-              formattedContent = (
-                <span>
-                  <strong style={{ color: '#1F3A9E' }}>{name}</strong>
-                  <span style={{ color: '#666', marginLeft: '8px' }}>•</span>
-                  <span style={{ color: '#28a745', marginLeft: '8px', fontWeight: '500' }}>{specialization}</span>
-                  <span style={{ color: '#666', marginLeft: '8px' }}>•</span>
-                  <span style={{ 
-                    color: employmentType.toLowerCase().includes('full time') ? '#28a745' :
-                           employmentType.toLowerCase().includes('part time') ? '#ffc107' : '#17a2b8',
-                    marginLeft: '8px',
-                    fontSize: '13px',
-                    fontWeight: '500',
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                    backgroundColor: employmentType.toLowerCase().includes('full time') ? '#d4edda' :
-                                    employmentType.toLowerCase().includes('part time') ? '#fff3cd' : '#d1ecf1'
-                  }}>
-                    {employmentType}
+            const tokens = content.split(' - ').map(t => t.trim()).filter(Boolean);
+            if (tokens.length >= 2) {
+              // Detect employment token in the last position
+              const last = tokens[tokens.length - 1];
+              const isEmployment = /(full\s*time|part\s*time|visiting|locum|consultant)/i.test(last);
+              const isNoCategory = /no\s*category\s*mentioned/i.test(last);
+
+              if (isEmployment) {
+                const employmentType = last;
+                const nameJoined = tokens.slice(0, -1).join(' '); // merge all prior tokens into the name
+                formattedContent = (
+                  <span>
+                    <strong style={{ color: '#1F3A9E' }}>{nameJoined}</strong>
+                    <span style={{ color: '#666', margin: '0 8px' }}>-</span>
+                    <span style={{ 
+                      color: employmentType.toLowerCase().includes('full time') ? '#28a745' :
+                             employmentType.toLowerCase().includes('part time') ? '#856404' : '#0c5460',
+                      marginLeft: '0',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      padding: '2px 6px',
+                      borderRadius: '4px',
+                      backgroundColor: employmentType.toLowerCase().includes('full time') ? '#d4edda' :
+                                      employmentType.toLowerCase().includes('part time') ? '#fff3cd' : '#d1ecf1'
+                    }}>
+                      {employmentType}
+                    </span>
                   </span>
-                </span>
-              );
+                );
+              } else if (isNoCategory) {
+                const nameJoined = tokens.slice(0, -1).join(' ');
+                formattedContent = (
+                  <span>
+                    <strong style={{ color: '#1F3A9E' }}>{nameJoined}</strong>
+                    <span style={{ color: '#666', marginLeft: '8px' }}>-</span>
+                    <span style={{ color: '#555', marginLeft: '8px' }}>{last}</span>
+                  </span>
+                );
+              } else {
+                // Default: keep first part as name and show remainder as plain text
+                const name = tokens[0];
+                const rest = tokens.slice(1).join(' - ');
+                formattedContent = (
+                  <span>
+                    <strong style={{ color: '#1F3A9E' }}>{name}</strong>
+                    <span style={{ color: '#666', marginLeft: '8px' }}>-</span>
+                    <span style={{ marginLeft: '8px' }}>{rest}</span>
+                  </span>
+                );
+              }
             }
           }
           
@@ -278,63 +302,92 @@ const FormattedMessage = ({ content }) => {
   );
 };
 
-// Component to render tables
+// Component to render tables (supports multiple tables and malformed rows)
 const TableRenderer = ({ content }) => {
-  const lines = content.split('\n').filter(line => line.trim());
-  
-  // Find table content
-  const tableStart = lines.findIndex(line => line.includes('|') && line.includes('---'));
-  const beforeTable = lines.slice(0, Math.max(0, tableStart - 1));
-  const afterTableStart = lines.findIndex((line, idx) => idx > tableStart && !line.includes('|'));
-  const tableLines = lines.slice(tableStart - 1, afterTableStart > -1 ? afterTableStart : lines.length);
-  const afterTable = afterTableStart > -1 ? lines.slice(afterTableStart) : [];
-  
-  // Parse table
-  const [headerLine, separatorLine, ...dataLines] = tableLines;
-  
-  if (!headerLine || !separatorLine) {
-    return <FormattedMessage content={content} />;
+  const lines = content.split('\n');
+
+  // Split content into blocks of tables and non-table text
+  const blocks = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const isTableLine = line.trim().startsWith('|');
+    if (!isTableLine) {
+      // accumulate non-table text until next table
+      const textBuf = [];
+      while (i < lines.length && !lines[i].trim().startsWith('|')) {
+        if (lines[i].trim()) textBuf.push(lines[i]);
+        i++;
+      }
+      if (textBuf.length) blocks.push({ type: 'text', lines: textBuf });
+    } else {
+      // accumulate table lines until a non-table line
+      const tableBuf = [];
+      while (i < lines.length && lines[i].trim().startsWith('|')) {
+        // ignore stray lines like "||||" (no cell content)
+        const raw = lines[i].trim();
+        const cells = raw.split('|').map(c => c.trim()).filter(Boolean);
+        if (cells.length > 0) tableBuf.push(lines[i]);
+        i++;
+      }
+      if (tableBuf.length) blocks.push({ type: 'table', lines: tableBuf });
+    }
   }
-  
-  const headers = headerLine.split('|').map(h => h.trim()).filter(h => h);
-  const rows = dataLines.map(line => 
-    line.split('|').map(cell => cell.trim()).filter(cell => cell)
-  ).filter(row => row.length > 0);
-  
-  return (
-    <div style={{ fontSize: '15px', lineHeight: '1.6' }}>
-      {/* Content before table */}
-      {beforeTable.map((line, index) => (
-        <div key={`before-${index}`} style={{ marginBottom: '8px' }}>
-          {line.trim()}
-        </div>
-      ))}
-      
-      {/* Table */}
-      <div style={{ 
+
+  const renderTable = (tableLines, key) => {
+    if (!tableLines || tableLines.length < 2) return null;
+
+    // Find header and separator; if missing, synthesize a header with generic columns
+    let headerIdx = 0;
+    let sepIdx = 1;
+    // If no explicit separator, try to detect by presence of --- or create one
+    if (!tableLines[1] || !tableLines[1].includes('---')) {
+      // infer columns from first row
+      const inferredCols = tableLines[0].split('|').map(c => c.trim()).filter(Boolean).length || 4;
+      const sep = Array(inferredCols).fill('---').join(' | ');
+      tableLines = [tableLines[0], `| ${sep} |`, ...tableLines.slice(1)];
+    }
+
+    const headerLine = tableLines[headerIdx];
+    const dataLines = tableLines.slice(2);
+
+  const headers = headerLine.split('|').map(h => h.trim()).filter(Boolean);
+  // Clean headers (fallback to Column N for blanks)
+  const headerCount = headers.length || 4;
+  const cleanHeaders = headers.length ? headers : Array.from({ length: headerCount }, (_, i) => `Column ${i + 1}`);
+
+    const rows = dataLines
+      .map(line => line.split('|').map(c => c.trim()))
+      .map(cells => cells.filter(Boolean))
+      .filter(row => row.length > 0);
+
+    // Normalize row lengths to headers length
+    const normalizedRows = rows.map(row => {
+      if (row.length === cleanHeaders.length) return row;
+      if (row.length < cleanHeaders.length) {
+        return [...row, ...Array(cleanHeaders.length - row.length).fill('')];
+      }
+      return row.slice(0, cleanHeaders.length);
+    });
+
+    return (
+      <div key={key} style={{ 
         margin: '16px 0',
         border: '1px solid #e8f1ff',
         borderRadius: '8px',
         overflow: 'hidden',
         boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
       }}>
-        <table style={{ 
-          width: '100%', 
-          borderCollapse: 'collapse',
-          fontSize: '14px'
-        }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
           <thead>
-            <tr style={{ 
-              background: 'linear-gradient(135deg, #2E4AC7 0%, #1F3A9E 100%)',
-              color: 'white'
-            }}>
-              {headers.map((header, index) => (
+            <tr style={{ background: 'linear-gradient(135deg, #2E4AC7 0%, #1F3A9E 100%)', color: 'white' }}>
+              {cleanHeaders.map((header, index) => (
                 <th key={index} style={{
                   padding: '12px 8px',
                   textAlign: 'left',
                   fontWeight: '600',
                   fontSize: '13px',
-                  borderRight: index < headers.length - 1 ? '1px solid rgba(255,255,255,0.2)' : 'none'
+                  borderRight: index < cleanHeaders.length - 1 ? '1px solid rgba(255,255,255,0.2)' : 'none'
                 }}>
                   {header}
                 </th>
@@ -342,18 +395,10 @@ const TableRenderer = ({ content }) => {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, rowIndex) => (
-              <tr key={rowIndex} style={{
-                background: rowIndex % 2 === 0 ? '#fafcff' : 'white',
-                borderBottom: '1px solid #f0f4f8'
-              }}>
+            {normalizedRows.map((row, rowIndex) => (
+              <tr key={rowIndex} style={{ background: rowIndex % 2 === 0 ? '#fafcff' : 'white', borderBottom: '1px solid #f0f4f8' }}>
                 {row.map((cell, cellIndex) => (
-                  <td key={cellIndex} style={{
-                    padding: '10px 8px',
-                    borderRight: cellIndex < row.length - 1 ? '1px solid #f0f4f8' : 'none',
-                    color: '#2d3748',
-                    lineHeight: '1.4'
-                  }}>
+                  <td key={cellIndex} style={{ padding: '10px 8px', borderRight: cellIndex < row.length - 1 ? '1px solid #f0f4f8' : 'none', color: '#2d3748', lineHeight: '1.4' }}>
                     {cell}
                   </td>
                 ))}
@@ -362,13 +407,21 @@ const TableRenderer = ({ content }) => {
           </tbody>
         </table>
       </div>
-      
-      {/* Content after table */}
-      {afterTable.map((line, index) => (
-        <div key={`after-${index}`} style={{ marginBottom: '8px' }}>
-          {line.trim()}
-        </div>
-      ))}
+    );
+  };
+
+  // Render blocks
+  return (
+    <div style={{ fontSize: '15px', lineHeight: '1.6' }}>
+      {blocks.map((block, idx) => {
+        if (block.type === 'text') {
+          return <FormattedMessage key={`text-${idx}`} content={block.lines.join('\n')} />;
+        }
+        if (block.type === 'table') {
+          return renderTable(block.lines, `table-${idx}`);
+        }
+        return null;
+      })}
     </div>
   );
 };
