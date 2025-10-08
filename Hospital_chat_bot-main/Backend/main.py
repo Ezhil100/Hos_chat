@@ -10,7 +10,38 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import firebase_admin
 from firebase_admin import credentials, storage
+try:
+    from firebase_admin import firestore as _firestore
+except Exception:
+    _firestore = None
 from dotenv import load_dotenv
+# Optional admin API import (works when running as script)
+try:
+    import admin_api as _admin_api  # type: ignore
+    admin_router = getattr(_admin_api, 'router', None)
+    save_chat_history = getattr(_admin_api, 'save_chat_history', None)
+    detect_appointment_intent = getattr(_admin_api, 'detect_appointment_intent', None)
+    extract_appointment_details = getattr(_admin_api, 'extract_appointment_details', None)
+    save_appointment_request = getattr(_admin_api, 'save_appointment_request', None)
+except Exception:
+    try:
+        # Try package-style import if Backend is a package
+        from . import admin_api as _admin_api  # type: ignore
+        admin_router = getattr(_admin_api, 'router', None)
+        save_chat_history = getattr(_admin_api, 'save_chat_history', None)
+        detect_appointment_intent = getattr(_admin_api, 'detect_appointment_intent', None)
+        extract_appointment_details = getattr(_admin_api, 'extract_appointment_details', None)
+        save_appointment_request = getattr(_admin_api, 'save_appointment_request', None)
+    except Exception:
+        admin_router = None
+        def save_chat_history(*args, **kwargs):
+            return False
+        def detect_appointment_intent(*args, **kwargs):
+            return False
+        def extract_appointment_details(*args, **kwargs):
+            return {"date": None, "time": None, "reason": None}
+        def save_appointment_request(*args, **kwargs):
+            return None
 
 # LangChain imports
 from langchain_community.document_loaders import UnstructuredPDFLoader, PyPDFLoader
@@ -31,6 +62,10 @@ app = FastAPI(
     version="1.0.0",
     description="AI-powered chatbot system for KG Hospital"
 )
+
+# Mount admin router without altering existing endpoints
+if admin_router is not None:
+    app.include_router(admin_router)
 
 PORT = int(os.getenv("PORT", 8000))
 
@@ -69,6 +104,13 @@ try:
 
     bucket = storage.bucket()
     FIREBASE_INITIALIZED = True
+    # If admin_api module is available, wire Firestore client for DB operations
+    try:
+        if _admin_api is not None and _firestore is not None:
+            setattr(_admin_api, 'FIREBASE_INITIALIZED', True)
+            setattr(_admin_api, 'db', _firestore.client())
+    except Exception:
+        pass
     print("Firebase initialized successfully")
 except Exception as e:
     print(f"Firebase initialization failed: {e}")
@@ -84,10 +126,15 @@ loaded_documents = []
 class ChatMessage(BaseModel):
     message: str
     user_role: str = "patient"
+    user_id: str | None = None
+    user_name: str | None = None
+    phone_number: str | None = None
 
 class ChatResponse(BaseModel):
     response: str
     timestamp: str
+    is_appointment_request: bool = False
+    appointment_id: str | None = None
 
 # =============================================================================
 # DOCUMENT PROCESSING FUNCTIONS
@@ -342,9 +389,70 @@ async def chat(message: ChatMessage):
 
         formatted_answer = format_response_text(answer)
 
+        # Detect appointment intent and save appointment if details are present
+        is_appointment = False
+        new_appointment_id = None
+        try:
+            wants_appointment = False
+            if 'detect_appointment_intent' in globals() and callable(detect_appointment_intent):
+                wants_appointment = bool(detect_appointment_intent(message.message))
+            # If intent detected and user provided contact info
+            if wants_appointment and (message.user_name and message.phone_number):
+                # Extract simple details
+                details = {"date": None, "time": None, "reason": None}
+                if 'extract_appointment_details' in globals() and callable(extract_appointment_details):
+                    try:
+                        details = extract_appointment_details(message.message) or details
+                    except Exception:
+                        pass
+                preferred_date = details.get('date') or 'Not specified'
+                preferred_time = details.get('time') or 'Not specified'
+                reason = details.get('reason') or 'General consultation'
+                if 'save_appointment_request' in globals() and callable(save_appointment_request):
+                    try:
+                        new_appointment_id = save_appointment_request(
+                            user_name=message.user_name,
+                            phone_number=message.phone_number,
+                            preferred_date=preferred_date,
+                            preferred_time=preferred_time,
+                            reason=reason,
+                            user_role=message.user_role,
+                            original_message=message.message,
+                        )
+                        if new_appointment_id:
+                            is_appointment = True
+                            # Append a friendly confirmation to the AI's answer
+                            confirmation = (f"\n\nAppointment request saved successfully.\n"
+                                            f"Name: {message.user_name}\n"
+                                            f"Phone: {message.phone_number}\n"
+                                            f"Preferred: {preferred_date} at {preferred_time}\n"
+                                            f"Reason: {reason}\n"
+                                            f"Reference ID: {new_appointment_id}")
+                            formatted_answer = f"{formatted_answer}\n{confirmation}"
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        # Save chat history via admin module (in-memory by default)
+        try:
+            if save_chat_history:
+                save_chat_history(
+                    user_id=message.user_id or "anonymous",
+                    user_role=message.user_role,
+                    user_name=message.user_name or "Anonymous User",
+                    message=message.message,
+                    response=formatted_answer,
+                    is_appointment=is_appointment,
+                )
+        except Exception:
+            pass
+
         return ChatResponse(
             response=formatted_answer,
-            timestamp=datetime.now().isoformat()
+            timestamp=datetime.now().isoformat(),
+            is_appointment_request=is_appointment,
+            appointment_id=new_appointment_id
         )
 
     except Exception as e:

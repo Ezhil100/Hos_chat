@@ -473,6 +473,15 @@ const App = () => {
   const [userRole, setUserRole] = useState('patient');
   const [isTyping, setIsTyping] = useState(false);
   const [showAdminModal, setShowAdminModal] = useState(false);
+  const [showUserInfoModal, setShowUserInfoModal] = useState(false);
+  const [adminTab, setAdminTab] = useState('dashboard');
+  const [chatHistory, setChatHistory] = useState([]);
+  const [appointments, setAppointments] = useState([]);
+  const [statistics, setStatistics] = useState({});
+  const [historyFilter, setHistoryFilter] = useState('all');
+  const [appointmentFilter, setAppointmentFilter] = useState('pending');
+  const [notifications, setNotifications] = useState([]);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [documents, setDocuments] = useState([]);
   const [uploadFile, setUploadFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -484,6 +493,11 @@ const App = () => {
   const [showQuickActions, setShowQuickActions] = useState(true);
   const [messageCount, setMessageCount] = useState(0);
   const [showRoleSelector, setShowRoleSelector] = useState(true);
+  const [userId, setUserId] = useState(null);
+  const [userName, setUserName] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [tempUserName, setTempUserName] = useState('');
+  const [tempPhoneNumber, setTempPhoneNumber] = useState('');
 
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -508,7 +522,13 @@ const App = () => {
       const response = await fetch(`${API_BASE_URL}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, user_role: userRole })
+        body: JSON.stringify({ 
+          message, 
+          user_role: userRole,
+          user_id: userId,
+          user_name: userName || null,
+          phone_number: phoneNumber || null
+        })
       });
       if (!response.ok) {
         const error = await response.json();
@@ -549,6 +569,57 @@ const App = () => {
       const response = await fetch(`${API_BASE_URL}/system/status`);
       if (!response.ok) throw new Error('Failed to fetch status');
       return await response.json();
+    },
+
+    // Admin APIs
+    getChatHistory: async (role = null) => {
+      const url = role && role !== 'all'
+        ? `${API_BASE_URL}/admin/chat-history?user_role=${role}`
+        : `${API_BASE_URL}/admin/chat-history`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Failed to fetch chat history');
+      return await response.json();
+    },
+
+    getAppointments: async (status = null) => {
+      const url = status
+        ? `${API_BASE_URL}/admin/appointments?status=${status}`
+        : `${API_BASE_URL}/admin/appointments`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Failed to fetch appointments');
+      return await response.json();
+    },
+
+    handleAppointment: async (appointmentId, action, notes = '') => {
+      const response = await fetch(`${API_BASE_URL}/admin/appointments/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appointment_id: appointmentId, action, admin_notes: notes })
+      });
+      if (!response.ok) throw new Error('Failed to update appointment');
+      return await response.json();
+    },
+
+    getStatistics: async () => {
+      const response = await fetch(`${API_BASE_URL}/admin/statistics`);
+      if (!response.ok) throw new Error('Failed to fetch statistics');
+      return await response.json();
+    },
+
+    getNotifications: async () => {
+      const response = await fetch(`${API_BASE_URL}/admin/notifications`);
+      if (!response.ok) throw new Error('Failed to fetch notifications');
+      return await response.json();
+    },
+
+    markNotificationRead: async (notificationId) => {
+      const response = await fetch(`${API_BASE_URL}/admin/notifications/mark-read`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notification_id: notificationId })
+      });
+      if (!response.ok) throw new Error('Failed to mark notification as read');
+      return await response.json();
     }
   };
 
@@ -572,11 +643,19 @@ const App = () => {
   const handleRoleSelection = (role) => {
     setUserRole(role);
     setShowRoleSelector(false);
+    // generate a simple client-side user id
+    const genId = `uid-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    setUserId(genId);
     setMessages([{
       type: 'bot',
       content: `Welcome! You are accessing as a ${role}. How can I help you today?`,
       timestamp: new Date().toLocaleTimeString()
     }]);
+    if (role === 'patient' || role === 'visitor') {
+      setTempUserName('');
+      setTempPhoneNumber('');
+      setShowUserInfoModal(true);
+    }
   };
 
   const handleSendMessage = async () => {
@@ -603,6 +682,18 @@ const App = () => {
         timestamp: new Date().toLocaleTimeString()
       };
       setMessages(prev => [...prev, botMsg]);
+      // Optionally surface appointment status in UI
+      if (response.is_appointment_request) {
+        setNotifications(prev => [{
+          id: `local-${Date.now()}`,
+          title: 'Appointment Request Captured',
+          message: `We saved your request. Reference: ${response.appointment_id || 'N/A'}`,
+          type: 'appointment_request',
+          read: false,
+          created_at: new Date().toISOString()
+        }, ...(prev || [])]);
+        setUnreadNotifications(prev => (prev || 0) + 1);
+      }
     } catch (error) {
       setMessages(prev => [...prev, {
         type: 'bot',
@@ -612,6 +703,25 @@ const App = () => {
     } finally {
       setIsTyping(false);
     }
+  };
+
+  const handleSaveUserInfo = () => {
+    const name = tempUserName.trim();
+    const phone = tempPhoneNumber.trim();
+    // simple validation for patient/visitor
+    if ((userRole === 'patient' || userRole === 'visitor')) {
+      if (!name) { alert('Please enter your name'); return; }
+      if (!/^\+?[0-9\-\s]{8,}$/.test(phone)) { alert('Please enter a valid phone number'); return; }
+    }
+    setUserName(name);
+    setPhoneNumber(phone);
+    setShowUserInfoModal(false);
+    // friendly acknowledgment
+    setMessages(prev => [...prev, {
+      type: 'bot',
+      content: `Thanks${name ? `, ${name}` : ''}. I have your contact ${phone ? `(${phone})` : ''}. You can ask to book an appointment anytime.`,
+      timestamp: new Date().toLocaleTimeString()
+    }]);
   };
 
   const loadDocuments = async () => {
@@ -777,6 +887,70 @@ const App = () => {
     setMessageCount(prev => prev + 1);
   };
 
+  // Admin data loaders
+  const loadChatHistory = async () => {
+    try {
+      const response = await api.getChatHistory(historyFilter === 'all' ? null : historyFilter);
+      setChatHistory(response.history || []);
+    } catch (error) {
+      console.error('Failed to load chat history:', error);
+    }
+  };
+
+  const loadAppointments = async () => {
+    try {
+      const response = await api.getAppointments(appointmentFilter);
+      setAppointments(response.appointments || []);
+    } catch (error) {
+      console.error('Failed to load appointments:', error);
+    }
+  };
+
+  const loadStatistics = async () => {
+    try {
+      const stats = await api.getStatistics();
+      setStatistics(stats);
+    } catch (error) {
+      console.error('Failed to load statistics:', error);
+    }
+  };
+
+  const loadNotifications = async () => {
+    try {
+      const response = await api.getNotifications();
+      setNotifications(response.notifications || []);
+      const unread = (response.notifications || []).filter(n => !n.read).length;
+      setUnreadNotifications(unread);
+    } catch (error) {
+      console.error('Failed to load notifications:', error);
+    }
+  };
+
+  const handleMarkNotificationRead = async (notificationId) => {
+    try {
+      await api.markNotificationRead(notificationId);
+      await loadNotifications();
+    } catch (error) {
+      console.error('Failed to mark notification as read:', error);
+    }
+  };
+
+  const handleAppointmentAction = async (appointmentId, action) => {
+    const notes = action === 'accept'
+      ? prompt('Add notes (optional):')
+      : prompt('Reason for rejection (optional):');
+    if (notes === null) return;
+    try {
+      await api.handleAppointment(appointmentId, action, notes || '');
+      await loadAppointments();
+      await loadStatistics();
+      await loadNotifications();
+      alert(`Appointment ${action}ed successfully!`);
+    } catch (error) {
+      alert(`Failed to ${action} appointment: ${error.message}`);
+    }
+  };
+
   const formatFileSize = (bytes) => {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
@@ -889,7 +1063,25 @@ const App = () => {
             <div style={styles.headerControls}>
               <div style={styles.userInfo}>
                 <span style={styles.userRole}>{userRole}</span>
+                {(userRole === 'patient' || userRole === 'visitor') && (
+                  <div style={{ fontSize: '12px', color: 'white', opacity: 0.9 }}>
+                    {userName ? userName : 'Guest'}{phoneNumber ? ` • ${phoneNumber}` : ''}
+                  </div>
+                )}
               </div>
+              {(userRole === 'patient' || userRole === 'visitor') && (
+                <button 
+                  style={styles.adminPanelBtn}
+                  onClick={() => {
+                    setTempUserName(userName || '');
+                    setTempPhoneNumber(phoneNumber || '');
+                    setShowUserInfoModal(true);
+                  }}
+                >
+                  <Icons.Settings />
+                  <span>Edit Info</span>
+                </button>
+              )}
               {userRole === 'admin' && (
                 <button 
                   style={styles.adminPanelBtn}
@@ -1019,8 +1211,36 @@ const App = () => {
                 <Icons.Close />
               </button>
             </div>
+            <div style={styles.adminTabs}>
+              <button 
+                style={{...styles.tabBtn, ...(adminTab === 'dashboard' ? styles.tabBtnActive : {})}}
+                onClick={() => setAdminTab('dashboard')}
+              >
+                Dashboard
+              </button>
+              <button 
+                style={{...styles.tabBtn, ...(adminTab === 'appointments' ? styles.tabBtnActive : {})}}
+                onClick={() => { setAdminTab('appointments'); loadAppointments(); loadStatistics(); }}
+              >
+                Appointments {statistics.pending_appointments > 0 && (<span style={styles.badge}>{statistics.pending_appointments}</span>)}
+              </button>
+              <button 
+                style={{...styles.tabBtn, ...(adminTab === 'history' ? styles.tabBtnActive : {})}}
+                onClick={() => { setAdminTab('history'); loadChatHistory(); }}
+              >
+                Chat History
+              </button>
+              <button 
+                style={{...styles.tabBtn, ...(adminTab === 'notifications' ? styles.tabBtnActive : {})}}
+                onClick={() => { setAdminTab('notifications'); loadNotifications(); }}
+              >
+                Notifications {unreadNotifications > 0 && (<span style={styles.badge}>{unreadNotifications}</span>)}
+              </button>
+            </div>
             
             <div style={styles.modalContent}>
+              {adminTab === 'dashboard' && (
+              <>
               <div style={styles.adminCard}>
                 <h3 style={styles.cardTitle}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1158,6 +1378,196 @@ const App = () => {
                       </div>
                     ))
                   )}
+                </div>
+              </div>
+              </>
+              )}
+
+              {adminTab === 'appointments' && (
+                <>
+                  <div style={styles.statsGrid}>
+                    <div style={styles.statCard}><div style={styles.statIcon}>📊</div><div><div style={styles.statValue}>{statistics.total_conversations || 0}</div><div style={styles.statLabel}>Total Chats</div></div></div>
+                    <div style={styles.statCard}><div style={styles.statIcon}>⏳</div><div><div style={styles.statValue}>{statistics.pending_appointments || 0}</div><div style={styles.statLabel}>Pending</div></div></div>
+                    <div style={styles.statCard}><div style={styles.statIcon}>✅</div><div><div style={styles.statValue}>{statistics.accepted_appointments || 0}</div><div style={styles.statLabel}>Accepted</div></div></div>
+                    <div style={styles.statCard}><div style={styles.statIcon}>❌</div><div><div style={styles.statValue}>{statistics.rejected_appointments || 0}</div><div style={styles.statLabel}>Rejected</div></div></div>
+                  </div>
+                  <div style={styles.adminCard}>
+                    <div style={styles.cardHeader}>
+                      <h3 style={styles.cardTitle}>Appointment Requests</h3>
+                      <select 
+                        value={appointmentFilter}
+                        onChange={(e) => { setAppointmentFilter(e.target.value); setTimeout(() => loadAppointments(), 100); }}
+                        style={styles.filterSelect}
+                      >
+                        <option value="pending">Pending</option>
+                        <option value="accepted">Accepted</option>
+                        <option value="rejected">Rejected</option>
+                      </select>
+                    </div>
+                    <div style={styles.appointmentsList}>
+                      {appointments.length === 0 ? (
+                        <p style={styles.noData}>No {appointmentFilter} appointments</p>
+                      ) : (
+                        appointments.map((apt, index) => (
+                          <div key={index} style={styles.appointmentCard}>
+                            <div style={styles.appointmentHeader}>
+                              <div>
+                                <h4 style={styles.appointmentName}>{apt.user_name}</h4>
+                                <span style={{...styles.appointmentBadge,
+                                  background: apt.status === 'pending' ? '#fff3cd' : apt.status === 'accepted' ? '#d4edda' : '#f8d7da',
+                                  color: apt.status === 'pending' ? '#856404' : apt.status === 'accepted' ? '#155724' : '#721c24'
+                                }}>{apt.status}</span>
+                              </div>
+                              <span style={styles.appointmentTime}>{new Date(apt.created_at).toLocaleString()}</span>
+                            </div>
+                            <div style={styles.appointmentDetails}>
+                              <div style={styles.appointmentRow}><span>📞</span><span style={styles.phoneNumber}>{apt.phone_number}</span></div>
+                              <div style={styles.appointmentRow}><span>📅</span><span>{apt.preferred_date} at {apt.preferred_time}</span></div>
+                              <div style={styles.appointmentReason}><strong>Reason:</strong> {apt.reason}</div>
+                              <div style={styles.appointmentMessage}><strong>Original Message:</strong> {apt.original_message}</div>
+                              {apt.admin_notes && (<div style={styles.adminNotes}><strong>Admin Notes:</strong> {apt.admin_notes}</div>)}
+                            </div>
+                            {apt.status === 'pending' && (
+                              <div style={styles.appointmentActions}>
+                                <button style={styles.acceptBtn} onClick={() => handleAppointmentAction(apt.appointment_id, 'accept')}>✅ Accept & Call Patient</button>
+                                <button style={styles.rejectBtn} onClick={() => handleAppointmentAction(apt.appointment_id, 'reject')}>❌ Reject</button>
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {adminTab === 'history' && (
+                <div style={styles.adminCard}>
+                  <div style={styles.cardHeader}>
+                    <h3 style={styles.cardTitle}>Chat History</h3>
+                    <select 
+                      value={historyFilter}
+                      onChange={(e) => { setHistoryFilter(e.target.value); setTimeout(() => loadChatHistory(), 100); }}
+                      style={styles.filterSelect}
+                    >
+                      <option value="all">All Roles</option>
+                      <option value="patient">Patients</option>
+                      <option value="visitor">Visitors</option>
+                      <option value="staff">Staff</option>
+                      <option value="admin">Admins</option>
+                    </select>
+                  </div>
+                  <div style={styles.historyList}>
+                    {chatHistory.length === 0 ? (
+                      <p style={styles.noData}>No chat history available</p>
+                    ) : (
+                      chatHistory.map((chat, index) => (
+                        <div key={index} style={styles.historyCard}>
+                          <div style={styles.historyHeader}>
+                            <div style={styles.historyUserInfo}>
+                              <strong style={styles.historyUser}>{chat.user_name}</strong>
+                              <span style={styles.historyRole}>{chat.user_role}</span>
+                              {chat.is_appointment_request && (<span style={styles.appointmentTag}>📅 Appointment</span>)}
+                            </div>
+                            <span style={styles.historyTime}>{new Date(chat.created_at).toLocaleString()}</span>
+                          </div>
+                          <div style={styles.historyMessage}>
+                            <div style={styles.historyQuestion}><strong>Q:</strong> {chat.message}</div>
+                            <div style={styles.historyAnswer}><strong>A:</strong> {chat.response}</div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {adminTab === 'notifications' && (
+                <div style={styles.adminCard}>
+                  <div style={styles.cardHeader}>
+                    <h3 style={styles.cardTitle}>Notifications ({notifications.length})</h3>
+                    <button onClick={loadNotifications} style={styles.reloadBtn}>↻ Refresh</button>
+                  </div>
+                  <div style={styles.notificationsList}>
+                    {notifications.length === 0 ? (
+                      <p style={styles.noData}>No notifications</p>
+                    ) : (
+                      notifications.map((n, index) => (
+                        <div key={index}
+                             style={{ ...styles.notificationCard, background: n.read ? '#f8f9fa' : '#e8f1ff' }}
+                             onClick={() => !n.read && handleMarkNotificationRead(n.id)}>
+                          <div style={styles.notificationHeader}>
+                            <h4 style={styles.notificationTitle}>{n.title}</h4>
+                            {!n.read && (<span style={styles.unreadBadge}>New</span>)}
+                          </div>
+                          <p style={styles.notificationMessage}>{n.message}</p>
+                          <div style={styles.notificationTime}>{new Date(n.created_at).toLocaleString()}</div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showUserInfoModal && (
+        <div style={styles.modalOverlay} onClick={(e) => {
+          if (e.target === e.currentTarget) setShowUserInfoModal(false);
+        }}>
+          <div style={styles.modalContainer} className="modal-container">
+            <div style={styles.modalHeader}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <Icons.Settings />
+                <h2 style={styles.modalTitle}>Your Information</h2>
+              </div>
+              <button 
+                style={styles.modalClose}
+                onClick={() => setShowUserInfoModal(false)}
+              >
+                <Icons.Close />
+              </button>
+            </div>
+            <div style={styles.modalContent} className="modal-content">
+              <div style={styles.adminCard} className="admin-card">
+                <h3 style={styles.cardTitle}>Please provide your details</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '12px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '13px', color: '#1F3A9E', fontWeight: '600' }}>Full Name</label>
+                    <input 
+                      type="text"
+                      value={tempUserName}
+                      onChange={(e) => setTempUserName(e.target.value)}
+                      placeholder="e.g., John Doe"
+                      style={{ padding: '12px 14px', border: '1px solid #d1e4ff', borderRadius: '10px', fontSize: '14px' }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '13px', color: '#1F3A9E', fontWeight: '600' }}>Phone Number</label>
+                    <input 
+                      type="tel"
+                      value={tempPhoneNumber}
+                      onChange={(e) => setTempPhoneNumber(e.target.value)}
+                      placeholder="e.g., +91 98765 43210"
+                      style={{ padding: '12px 14px', border: '1px solid #d1e4ff', borderRadius: '10px', fontSize: '14px' }}
+                    />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px' }}>
+                  <button 
+                    style={{...styles.uploadBtn, background: '#e2e8f0', color: '#1f2937'}} 
+                    onClick={() => setShowUserInfoModal(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    style={styles.uploadBtn}
+                    onClick={handleSaveUserInfo}
+                  >
+                    Save Details
+                  </button>
                 </div>
               </div>
             </div>
@@ -1743,7 +2153,96 @@ const styles = {
     fontSize: '12px',
     color: '#718096',
     fontWeight: '500'
-  }
+  },
+  adminTabs: {
+    display: 'flex',
+    gap: '10px',
+    padding: '12px 20px',
+    borderBottom: '1px solid #e2e8f0',
+    background: 'linear-gradient(135deg, #ffffff 0%, #f8fafe 100%)'
+  },
+  tabBtn: {
+    padding: '10px 14px',
+    background: '#f1f5ff',
+    border: '1px solid #d1e4ff',
+    color: '#1F3A9E',
+    borderRadius: '10px',
+    cursor: 'pointer',
+    fontSize: '13px',
+    fontWeight: '600'
+  },
+  tabBtnActive: {
+    background: '#2E4AC7',
+    color: 'white',
+    borderColor: '#1F3A9E'
+  },
+  badge: {
+    marginLeft: '6px',
+    background: '#fff3cd',
+    color: '#856404',
+    borderRadius: '10px',
+    padding: '2px 6px',
+    fontSize: '12px',
+    fontWeight: '700'
+  },
+  statsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+    gap: '12px',
+    marginBottom: '16px'
+  },
+  statCard: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    padding: '14px',
+    background: 'linear-gradient(135deg, #f8fafe 0%, #f0f8ff 100%)',
+    borderRadius: '12px',
+    border: '1px solid #e8f1ff'
+  },
+  statIcon: { fontSize: '18px' },
+  statValue: { fontWeight: '800', fontSize: '18px' },
+  statLabel: { color: '#718096', fontSize: '12px' },
+  filterSelect: {
+    padding: '8px 10px',
+    borderRadius: '8px',
+    border: '1px solid #d1e4ff',
+    background: 'white',
+    color: '#1F3A9E',
+    fontWeight: '600'
+  },
+  appointmentsList: { display: 'flex', flexDirection: 'column', gap: '12px' },
+  appointmentCard: { border: '1px solid #e8f1ff', borderRadius: '12px', padding: '16px', background: '#fff' },
+  appointmentHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' },
+  appointmentName: { margin: 0, fontSize: '16px', color: '#1F3A9E' },
+  appointmentBadge: { marginLeft: '8px', borderRadius: '8px', padding: '2px 6px', fontSize: '12px', fontWeight: '700' },
+  appointmentTime: { fontSize: '12px', color: '#718096' },
+  appointmentDetails: { display: 'flex', flexDirection: 'column', gap: '6px', color: '#2d3748' },
+  appointmentRow: { display: 'flex', gap: '8px', alignItems: 'center' },
+  phoneNumber: { fontWeight: '700', color: '#2d3748' },
+  appointmentReason: {},
+  appointmentMessage: { background: '#f8fafc', padding: '8px', borderRadius: '8px', border: '1px solid #e8f1ff' },
+  adminNotes: { background: '#fffbea', padding: '8px', borderRadius: '8px', border: '1px solid #fff3cd' },
+  appointmentActions: { display: 'flex', gap: '10px', marginTop: '10px' },
+  acceptBtn: { padding: '8px 12px', background: '#d4edda', color: '#155724', border: '1px solid #c3e6cb', borderRadius: '8px', cursor: 'pointer', fontWeight: '700' },
+  rejectBtn: { padding: '8px 12px', background: '#f8d7da', color: '#721c24', border: '1px solid #f5c6cb', borderRadius: '8px', cursor: 'pointer', fontWeight: '700' },
+  historyList: { display: 'flex', flexDirection: 'column', gap: '12px' },
+  historyCard: { border: '1px solid #e8f1ff', borderRadius: '12px', padding: '16px', background: '#fff' },
+  historyHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' },
+  historyUserInfo: { display: 'flex', alignItems: 'center', gap: '8px' },
+  historyUser: { color: '#1F3A9E' },
+  historyRole: { background: '#eef2ff', color: '#1F3A9E', borderRadius: '8px', padding: '2px 6px', fontSize: '12px', fontWeight: '700' },
+  appointmentTag: { marginLeft: '8px' },
+  historyTime: { fontSize: '12px', color: '#718096' },
+  historyMessage: { display: 'flex', flexDirection: 'column', gap: '6px' },
+  notificationsList: { display: 'flex', flexDirection: 'column', gap: '12px' },
+  notificationCard: { border: '1px solid #e8f1ff', borderRadius: '12px', padding: '12px', cursor: 'pointer' },
+  notificationHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  notificationTitle: { margin: 0, color: '#1F3A9E' },
+  unreadBadge: { background: '#2E4AC7', color: 'white', borderRadius: '8px', padding: '2px 6px', fontSize: '11px', fontWeight: '700' },
+  notificationMessage: { margin: '8px 0', color: '#2d3748' },
+  notificationTime: { fontSize: '12px', color: '#718096' },
+  noData: { textAlign: 'center', color: '#718096', padding: '16px' }
 };
 
 const styleSheet = document.createElement('style');
